@@ -8,6 +8,14 @@ import { Mathematics } from '@tiptap-pro/extension-mathematics'
 import { posToDOMRect } from '@tiptap/core';
 import 'katex/dist/katex.min.css'
 
+const processContent = async (text: string): Promise<string> => {
+    return new Promise((resolve) => {
+        setTimeout(() => {
+            resolve(text);
+        }, 2000);
+    });
+};
+
 const WavefrontExtension = Extension.create({
     name: 'wavefront',
     addStorage() {
@@ -22,8 +30,14 @@ const WavefrontExtension = Extension.create({
             'Shift-Enter': ({ editor }) => {
                 const cursorY = editor.storage.wavefront.cursorYPosition;
                 const wavefrontY = editor.storage.wavefront.wavefrontYPosition;
-                if (wavefrontY <= cursorY) {
-                    editor.storage.wavefront.wavefrontYPosition = editor.storage.wavefront.cursorYPosition;
+                if (!editor.storage.wavefront.isProcessing) {
+                    editor.storage.wavefront.isProcessing = true;
+                    if (wavefrontY <= cursorY) {
+                        editor.storage.wavefront.wavefrontYPosition = editor.storage.wavefront.cursorYPosition;
+                    }
+                    processContent(editor.getHTML()).then((html) => {
+                        editor.storage.wavefront.isProcessing = false;
+                    });
                 }
                 editor.commands.focus(); // to force a re-render
                 return true;
@@ -42,10 +56,11 @@ const WavefrontExtension = Extension.create({
     
         if (editor.storage.wavefront.wavefrontYPosition >= lastLineY) {
             editor.storage.wavefront.wavefrontYPosition = newPosition;
-            editor.commands.focus();
+            editor.commands.focus(); // to force a re-render
         }
     }
 });
+
 
 export default function Editor() {
     const [lineHeight, setLineHeight] = useState(21);
@@ -66,6 +81,7 @@ export default function Editor() {
     return (
         <div className="w-full max-w-4xl mx-auto relative">
             {editor && (
+                // wavefront indicator
                 <div
                     className="absolute left-0 w-[1px] bg-gray-300 transition-all duration-200 -translate-x-3"
                     style={{
