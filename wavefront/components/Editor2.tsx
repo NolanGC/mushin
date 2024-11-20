@@ -21,6 +21,7 @@ const WavefrontExtension = Extension.create({
     addStorage() {
         return {
             wavefrontYPosition: 0,
+            prevWavefrontYPosition: 0,
             cursorYPosition: 0,
             isProcessing: false,
         };
@@ -33,10 +34,12 @@ const WavefrontExtension = Extension.create({
                 if (!editor.storage.wavefront.isProcessing) {
                     editor.storage.wavefront.isProcessing = true;
                     if (wavefrontY <= cursorY) {
+                        editor.storage.wavefront.prevWavefrontYPosition = editor.storage.wavefront.wavefrontYPosition;
                         editor.storage.wavefront.wavefrontYPosition = editor.storage.wavefront.cursorYPosition;
                     }
                     processContent(editor.getHTML()).then((html) => {
                         editor.storage.wavefront.isProcessing = false;
+                        editor.commands.focus(); // to force a re-render
                     });
                 }
                 editor.commands.focus(); // to force a re-render
@@ -64,6 +67,8 @@ const WavefrontExtension = Extension.create({
 
 export default function Editor() {
     const [lineHeight, setLineHeight] = useState(21);
+    const [isVisible, setIsVisible] = useState(false);
+    const [shouldRender, setShouldRender] = useState(false);
 
     const editor = useEditor({
         extensions: [
@@ -78,17 +83,49 @@ export default function Editor() {
         autofocus: true,
     });
 
+    useEffect(() => {
+        if (editor?.storage.wavefront.isProcessing) {
+            setIsVisible(true);
+            setShouldRender(true);
+        } else {
+            setIsVisible(false);
+            // Wait for fade-out animation to complete before removing from DOM
+            setTimeout(() => setShouldRender(false), 300);
+        }
+    }, [editor?.storage.wavefront.isProcessing]);
+
     return (
         <div className="w-full max-w-4xl mx-auto relative">
             {editor && (
-                // wavefront indicator
-                <div
-                    className="absolute left-0 w-[1px] bg-gray-300 transition-all duration-200 -translate-x-3"
-                    style={{
-                        top: `${editor.storage.wavefront.wavefrontYPosition}px`,
-                        height: `${lineHeight}px`,
-                    }}
-                />
+                <>
+                    {/* Processing place */}
+                    {shouldRender && (
+                        <>
+                            <div
+                                className="absolute left-0 right-0 bg-white z-10 pointer-events-none select-none"
+                                style={{
+                                    top: `${editor.storage.wavefront.prevWavefrontYPosition}px`,
+                                    height: `${editor.storage.wavefront.wavefrontYPosition - editor.storage.wavefront.prevWavefrontYPosition}px`,
+                                }}
+                            />
+                            <div
+                                className={`absolute left-0 right-0 bg-gray-100 z-20 animate-pulse rounded-lg pointer-events-none select-none ${isVisible ? 'fade-in' : 'fade-out'}`}
+                                style={{
+                                    top: `${editor.storage.wavefront.prevWavefrontYPosition}px`,
+                                    height: `${editor.storage.wavefront.wavefrontYPosition - editor.storage.wavefront.prevWavefrontYPosition}px`,
+                                }}
+                            />
+                        </>
+                    )}
+                    {/* wavefront indicator */}
+                    <div
+                        className="absolute left-0 w-[1px] bg-gray-300 transition-all duration-200 -translate-x-3"
+                        style={{
+                            top: `${editor.storage.wavefront.wavefrontYPosition}px`,
+                            height: `${lineHeight}px`,
+                        }}
+                    />
+                </>
             )}
             <div>
                 <EditorContent
