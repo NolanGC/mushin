@@ -52,7 +52,8 @@ const WavefrontExtension = Extension.create({
             wavefrontYPosition: 0,
             prevWavefrontYPosition: 0,
             cursorYPosition: 0,
-            isProcessing: false
+            isProcessing: false,
+            targetYPosition: 0
         };
     },
 
@@ -84,12 +85,11 @@ const WavefrontExtension = Extension.create({
                 const selectedText = editor.state.doc.textBetween(
                     wavefrontPos, 
                     cursorPos,
-                    "\n",
                     "\n"
-                ).trim();
+                );
 
-                // Skip if text is empty or only whitespace
-                if (!selectedText) {
+                // Skip if text is empty (but not if it's just newlines)
+                if (selectedText.length === 0) {
                     return true;
                 }
                 
@@ -100,34 +100,40 @@ const WavefrontExtension = Extension.create({
                 // Create the promise that will resolve to the processed text
                 const textPromise = processContent(selectedText);
                 
-                // Update wavefront position
+                // Calculate the final position before any changes
+                const editorRect = editor.view.dom.getBoundingClientRect();
+                const endCoords2 = editor.view.coordsAtPos(cursorPos);
+                const finalY = endCoords2.bottom - editorRect.top;
+                
+                // Store the target position for after processing
+                editor.storage.wavefront.targetYPosition = finalY;
                 editor.storage.wavefront.prevWavefrontYPosition = editor.storage.wavefront.wavefrontYPosition;
-                editor.storage.wavefront.wavefrontYPosition = editor.storage.wavefront.cursorYPosition;
                 editor.storage.wavefront.isProcessing = true;
 
                 // Replace content with loading node
                 const tr = editor.state.tr;
                 
-                // Store current selection
-                const currentSelection = editor.state.selection;
-                
+                // First delete the content
                 tr.delete(wavefrontPos, cursorPos);
-                tr.insert(wavefrontPos, editor.schema.nodes.loading.create({
+                
+                // Then insert the loading node
+                const loadingNode = editor.schema.nodes.loading.create({
                     height,
                     originalText: selectedText
-                }));
+                });
+                const insertPos = tr.mapping.map(wavefrontPos);
+                tr.insert(insertPos, loadingNode);
                 
-                // Restore selection
-                tr.setSelection(currentSelection);
+                // Insert a new paragraph after the loading node to ensure cursor stays below
+                const emptyParagraph = editor.schema.nodes.paragraph.create();
+                const afterLoadingPos = insertPos + loadingNode.nodeSize;
+                tr.insert(afterLoadingPos, emptyParagraph);
                 
-                // Update wavefront position to be at the cursor
-                const editorRect = editor.view.dom.getBoundingClientRect();
-                const cursorRect = posToDOMRect(editor.view, cursorPos, cursorPos);
-                const newY = cursorRect.top - editorRect.top;
-                
-                editor.storage.wavefront.prevWavefrontYPosition = editor.storage.wavefront.wavefrontYPosition;
-                editor.storage.wavefront.wavefrontYPosition = newY;
-                editor.storage.wavefront.cursorYPosition = newY;
+                // Set cursor in the empty paragraph
+                const finalPos = afterLoadingPos + 1;
+                const resolvedPos = tr.doc.resolve(finalPos);
+                const newSelection = editor.state.selection.constructor.near(resolvedPos);
+                tr.setSelection(newSelection);
                 
                 editor.view.dispatch(tr);
 
@@ -146,14 +152,30 @@ const WavefrontExtension = Extension.create({
                         const tr = editor.state.tr;
                         
                         // Replace loading node with processed text
-                        tr.delete(loadingNodePos, loadingNodePos + 1)
-                          .insert(
-                            loadingNodePos,
-                            editor.schema.nodes.paragraph.create(
-                              {},
-                              editor.schema.text(processedHtml)
-                            )
-                          );
+                        tr.delete(loadingNodePos, loadingNodePos + 1);
+                        
+                        const paragraph = editor.schema.nodes.paragraph.create(
+                            {},
+                            editor.schema.text(processedHtml)
+                        );
+                        
+                        const insertPos = tr.mapping.map(loadingNodePos);
+                        tr.insert(insertPos, paragraph);
+                        
+                        // Keep cursor in its current position
+                        const currentSelection = editor.state.selection;
+                        if (currentSelection) {
+                            const mappedFrom = tr.mapping.map(currentSelection.from);
+                            const mappedTo = tr.mapping.map(currentSelection.to);
+                            tr.setSelection(editor.state.selection.constructor.create(
+                                tr.doc,
+                                mappedFrom,
+                                mappedTo
+                            ));
+                        }
+
+                        // Update wavefront position to the stored target position
+                        editor.storage.wavefront.wavefrontYPosition = editor.storage.wavefront.targetYPosition;
                         
                         editor.view.dispatch(tr);
                     }
